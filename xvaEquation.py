@@ -6,10 +6,10 @@ from scipy.stats import multivariate_normal as normal
 class PricingForward(Equation):
     def __init__(self,eqn_config):
         super(PricingForward, self).__init__(eqn_config)
-        self.strike = 100
-        self.x_init = np.ones(self.dim) * self.strike  # initial value of x, the underlying
-        self.sigma = 0.25    # volatility 
-        self.mu_bar = 0.0    # drift 
+        self.strike = eqn_config.strike
+        self.x_init = np.ones(self.dim) * eqn_config.x_init  # initial value of x, the underlying
+        self.sigma = eqn_config.sigma    # volatility 
+        self.mu_bar = eqn_config.r    # drift 
         self.rl = 0.0        # lending rate
         self.rb = 0.0        # borrowing rate      
         self.useExplict = False #whether to use explict formula to evaluate dyanamics of x

@@ -5,7 +5,7 @@ from solver import BSDESolver
 from tqdm import tqdm
 import xvaEquation as eqn
 import munch
-
+from scipy.stats import norm
 
  
 
@@ -15,20 +15,29 @@ if __name__ == "__main__":
     batch_size = 64
     total_time = 1.0
     num_time_interval=200
+    strike = 100
+    r = 0.0
+    sigma=0.25
+    x_init=100
     config = {
                 "eqn_config": {
                     "_comment": "a forward contract",
                     "eqn_name": "PricingForward",
                     "total_time": total_time,
                     "dim": dim,
-                    "num_time_interval": num_time_interval
+                    "num_time_interval": num_time_interval,
+                    "strike":strike,
+                    "r":r,
+                    "sigma":sigma,
+                    "x_init":x_init
+
                 },
                 "net_config": {
-                    "y_init_range": [90, 110],
+                    "y_init_range": [-5, 5],
                     "num_hiddens": [dim+20, dim+20],
-                    "lr_values": [5e-3, 5e-3],
+                    "lr_values": [5e-2, 5e-3],
                     "lr_boundaries": [2000],
-                    "num_iterations": 100,
+                    "num_iterations": 4000,
                     "batch_size": batch_size,
                     "valid_size": 256,
                     "logging_frequency": 100,
@@ -42,16 +51,38 @@ if __name__ == "__main__":
     
     #apply algorithm 1
     bsde_solver = BSDESolver(config, bsde)
-    training_history = bsde_solver.train()
+    training_history = bsde_solver.train()  
 
+    
     #apply trained model to evaluate value of the forward contract via Monte Carlo
     simulations = np.zeros((P,dim,config.eqn_config.num_time_interval+1))
     num_batch = P//batch_size #number of batches
     for i in tqdm(range(num_batch)):
-        simulations[i*batch_size:(i+1)*batch_size] = bsde_solver.model.call(bsde.sample(config.net_config.batch_size),False).numpy()
+         simulations[i*batch_size:(i+1)*batch_size,:,:] = bsde_solver.model.simulate(bsde.sample(config.net_config.batch_size))
     
-    # REMARK: code is only valid when risk-free return r=0
-    epe = np.mean(np.maximum(simulations,0),axis=0)
-    ene = np.mean(np.minimum(simulations,0),axis=0)
+    #estimated epected positive and negative exposure
+    time_stamp = np.linspace(0,1,num_time_interval+1)
+    epe = np.mean(np.exp(-r*time_stamp)*np.maximum(simulations,0),axis=0)    
+    ene = np.mean(np.exp(-r*time_stamp)*np.minimum(simulations,0),axis=0)
 
+    #exact solution
+    rv = norm()    
+    
+    d1 = np.array([(-r * s + np.log(x_init/strike) + (r+sigma**2/2)*s)/sigma/np.sqrt(s) 
+                for s in time_stamp[1:]])
+    d2 = np.array([d1[i]-sigma*np.sqrt(s) for i,s in enumerate(time_stamp[1:])])
 
+    epe_exact = x_init*rv.cdf(d1) - strike*np.exp(-r)*rv.cdf(d2)
+    ene_exact = x_init*rv.cdf(-d1) - strike*np.exp(-r)*rv.cdf(-d2)
+
+    plt.figure()
+    plt.plot(time_stamp,[0.0]+list(epe_exact),'b--',label='DEPE = exact solution',)
+    plt.plot(time_stamp,epe[0],'b',label='DEPE = deep solver approximation')
+
+    plt.plot(time_stamp,[0.0]+list(ene_exact),'r--',label='DNPE = exact solution',)
+    plt.plot(time_stamp,ene[0],'r',label='DNPE = deep solver approximation')
+
+    plt.xlabel('t')
+    plt.legend()
+
+    plt.show()

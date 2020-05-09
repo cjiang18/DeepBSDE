@@ -2,6 +2,7 @@ import logging
 import time
 import numpy as np
 import tensorflow as tf
+from tqdm import tqdm
 
 DELTA_CLIP = 50.0
 
@@ -25,14 +26,16 @@ class BSDESolver(object):
         valid_data = self.bsde.sample(self.net_config.valid_size)
 
         # begin sgd iteration
-        for step in range(self.net_config.num_iterations+1):
+        for step in tqdm(range(self.net_config.num_iterations+1)):
             if step % self.net_config.logging_frequency == 0:
                 loss = self.loss_fn(valid_data, training=False).numpy()
                 y_init = self.y_init.numpy()[0]
                 elapsed_time = time.time() - start_time
                 training_history.append([step, loss, y_init, elapsed_time])
                 if self.net_config.verbose:
-                    logging.info("step: %5u,    loss: %.4e, Y0: %.4e,   elapsed time: %3u" % (
+                    #logging.info("step: %5u,    loss: %.4e, Y0: %.4e,   elapsed time: %3u" % (
+                    #    step, loss, y_init, elapsed_time))
+                    print("step: %5u,    loss: %.4e, Y0: %.4e,   elapsed time: %3u" % (
                         step, loss, y_init, elapsed_time))
             self.train_step(self.bsde.sample(self.net_config.batch_size))
         return np.array(training_history)
@@ -58,8 +61,7 @@ class BSDESolver(object):
     def train_step(self, train_data):
         grad = self.grad(train_data, training=True)
         self.optimizer.apply_gradients(zip(grad, self.model.trainable_variables))
-
-
+        
 class NonsharedModel(tf.keras.Model):
     def __init__(self, config, bsde):
         super(NonsharedModel, self).__init__()
@@ -82,17 +84,40 @@ class NonsharedModel(tf.keras.Model):
         all_one_vec = tf.ones(shape=tf.stack([tf.shape(dw)[0], 1]), dtype=self.net_config.dtype)
         y = all_one_vec * self.y_init
         z = tf.matmul(all_one_vec, self.z_init)
-
+        
         for t in range(0, self.bsde.num_time_interval-1):
             y = y - self.bsde.delta_t * (
                 self.bsde.f_tf(time_stamp[t], x[:, :, t], y, z)
-            ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)
+            ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)           
             z = self.subnet[t](x[:, :, t + 1], training) / self.bsde.dim
         # terminal time
         y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z) + \
             tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
-
         return y
+
+    def simulate(self, inputs):
+        dw, x = inputs
+        time_stamp = np.arange(0, self.eqn_config.num_time_interval) * self.bsde.delta_t
+        all_one_vec = tf.ones(shape=tf.stack([tf.shape(dw)[0], 1]), dtype=self.net_config.dtype)
+        y = all_one_vec * self.y_init
+        z = tf.matmul(all_one_vec, self.z_init)        
+        
+        history=tf.zeros_like(x).numpy() 
+        history[:,:,0]=y
+        
+        for t in range(0, self.bsde.num_time_interval-1):
+            y = y - self.bsde.delta_t * (
+                self.bsde.f_tf(time_stamp[t], x[:, :, t], y, z)
+            ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)
+            
+            history[:,:,t+1]=y.numpy()
+            z = self.subnet[t](x[:, :, t + 1], False) / self.bsde.dim
+        # terminal time
+        y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z) + \
+            tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
+       
+        history[:,:,-1]=y.numpy()
+        return history            
 
 
 class FeedForwardSubNet(tf.keras.Model):

@@ -50,8 +50,8 @@ class BasketOption(Equation):
     def __init__(self, eqn_config):
 
         super(BasketOption, self).__init__(eqn_config)
-        self.x_init = 100
-        self.strike = self.x_init*self.dim
+        self.x_init = eqn_config.x_init
+        self.strike = eqn_config.strike
         self.sigma = eqn_config.sigma
         self.r = eqn_config.r
         self.useExplict = False #whether to use explict formula to evaluate dyanamics of x

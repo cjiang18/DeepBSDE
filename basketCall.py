@@ -16,10 +16,11 @@ if __name__ == "__main__":
     batch_size = 64
     total_time = 1.0
     num_time_interval = 100
-    r = 0.01
+    r = 0.04
     sigma = 0.25
     x_init = 100
-    strike = None
+    strike = x_init*dim
+    exact = 398.03 # set to None when not calculated beforehand
     config = {
 
                 "eqn_config": {
@@ -35,13 +36,13 @@ if __name__ == "__main__":
                 },
 
                 "net_config": {
-                    "y_init_range": [390, 450],
+                    "y_init_range": [395, 400],
                     "num_hiddens": [dim+10, dim+10],
                     "lr_values": [5e-2, 5e-3],
                     "lr_boundaries": [2000],
-                    "num_iterations": 2000,
+                    "num_iterations": 4000,
                     "batch_size": batch_size,
-                    "valid_size": 256,
+                    "valid_size": 128,
                     "logging_frequency": 100,
                     "dtype": "float64",
                     "verbose": True
@@ -50,12 +51,22 @@ if __name__ == "__main__":
 
     config = munch.munchify(config) 
     bsde = getattr(eqn, config.eqn_config.eqn_name)(config.eqn_config)
-    tf.keras.backend.set_floatx(config.net_config.dtype)    
+    tf.keras.backend.set_floatx(config.net_config.dtype)   
+
+    #estimate the 'exact' solution via Monte Carlo Simulation
+    if exact is None:
+        print('start \'exact value\' estimation')
+        exact = []
+        for i in tqdm(range(100)):
+            exact+=list(bsde.g_tf(1,bsde.sample(1024)[1][:,:,-1]).numpy()[:,0])
+        exact = np.mean(exact)*np.exp(-r)
+        print('Exact vlaue is {0:.2f}'.format(exact))
 
     #apply algorithm 1
 
     bsde_solver = BSDESolver(config, bsde)
-    training_history = bsde_solver.train()      
+    training_history = bsde_solver.train()  
+
 
     #apply trained model to evaluate value of the forward contract via Monte Carlo
 
@@ -71,8 +82,6 @@ if __name__ == "__main__":
     time_stamp = np.linspace(0,1,num_time_interval+1)
     epe = np.mean(np.exp(-r*time_stamp)*np.maximum(simulations,0),axis=0)
     ene = np.mean(np.exp(-r*time_stamp)*np.minimum(simulations,0),axis=0)
-
-    exact = 398.56
 
     epe_exact = np.array([exact for s in time_stamp])
     ene_exact = np.array([0.0 for s in time_stamp])
@@ -92,6 +101,8 @@ if __name__ == "__main__":
 
     plt.show()   
 
+'''
     df = pd.DataFrame(simulations[:,0,:])
     filepath = 'exposureForward' + config.eqn_config.eqn_name + '.xlsx'
     df.to_excel(filepath, index=False)
+'''

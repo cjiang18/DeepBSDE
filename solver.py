@@ -16,8 +16,13 @@ class BSDESolver(object):
 
         self.model = NonsharedModel(config, bsde)
         self.y_init = self.model.y_init
-        lr_schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-            self.net_config.lr_boundaries, self.net_config.lr_values)
+
+        try:
+            lr_schedule = config.net_config.lr_schedule
+        except AttributeError:
+            lr_schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+                self.net_config.lr_boundaries, self.net_config.lr_values)     
+            
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule, epsilon=1e-8)
 
     def train(self):
@@ -93,31 +98,35 @@ class NonsharedModel(tf.keras.Model):
         # terminal time
         y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z) + \
             tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
-        return y
+        return y         
 
-    def simulate(self, inputs):
-        dw, x = inputs
+    def predict_step(self, data):
+        # this function returns value of y at each future time
+
+        dw, x = data[0]
         time_stamp = np.arange(0, self.eqn_config.num_time_interval) * self.bsde.delta_t
         all_one_vec = tf.ones(shape=tf.stack([tf.shape(dw)[0], 1]), dtype=self.net_config.dtype)
         y = all_one_vec * self.y_init
         z = tf.matmul(all_one_vec, self.z_init)        
         
-        history=tf.zeros((tf.shape(dw)[0],1,self.bsde.num_time_interval+1)).numpy()
-        history[:,:,0]=y.numpy()
+        history = tf.TensorArray(self.net_config.dtype,size=self.bsde.num_time_interval+1)     
+        history = history.write(0,y)
         
         for t in range(0, self.bsde.num_time_interval-1):
             y = y - self.bsde.delta_t * (
                 self.bsde.f_tf(time_stamp[t], x[:, :, t], y, z)
             ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)
             
-            history[:,:,t+1]=y.numpy()
+            history = history.write(t+1,y)
             z = self.subnet[t](x[:, :, t + 1], False) / self.bsde.dim
         # terminal time
         y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z) + \
             tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
        
-        history[:,:,-1]=y.numpy()
-        return history            
+        history = history.write(self.bsde.num_time_interval,y)
+        history = tf.transpose(history.stack(),perm=[1,2,0])
+        return history         
+        
 
 
 class FeedForwardSubNet(tf.keras.Model):

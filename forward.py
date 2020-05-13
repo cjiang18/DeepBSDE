@@ -14,7 +14,7 @@ if __name__ == "__main__":
     P = 2048 #number of outer Monte Carlo Loops
     batch_size = 64
     total_time = 1.0
-    num_time_interval=200
+    num_time_interval=100
     strike = 100
     r = 0.0
     sigma=0.25
@@ -37,7 +37,7 @@ if __name__ == "__main__":
                     "num_hiddens": [dim+20, dim+20],
                     "lr_values": [5e-2, 5e-3],
                     "lr_boundaries": [2000],
-                    "num_iterations": 4000,
+                    "num_iterations": 2000,
                     "batch_size": batch_size,
                     "valid_size": 256,
                     "logging_frequency": 100,
@@ -55,10 +55,11 @@ if __name__ == "__main__":
 
     
     #apply trained model to evaluate value of the forward contract via Monte Carlo
-    simulations = np.zeros((P,1,config.eqn_config.num_time_interval+1))
-    num_batch = P//batch_size #number of batches
-    for i in tqdm(range(num_batch)):
-         simulations[i*batch_size:(i+1)*batch_size,:,:] = bsde_solver.model.simulate(bsde.sample(config.net_config.batch_size))
+    simulations = bsde_solver.model.predict(bsde.sample(P))
+    #simulations = np.zeros((P,1,config.eqn_config.num_time_interval+1))
+    #num_batch = P//batch_size #number of batches
+    #for i in tqdm(range(num_batch)):
+    #     simulations[i*batch_size:(i+1)*batch_size,:,:] = bsde_solver.model.simulate(bsde.sample(config.net_config.batch_size))
     
     #estimated epected positive and negative exposure
     time_stamp = np.linspace(0,1,num_time_interval+1)
@@ -86,3 +87,5 @@ if __name__ == "__main__":
     plt.legend()
 
     plt.show()
+
+   # bsde_solver.model.save('testmodel.tf',save_format='tf')

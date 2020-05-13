@@ -102,8 +102,8 @@ class NonsharedModel(tf.keras.Model):
         y = all_one_vec * self.y_init
         z = tf.matmul(all_one_vec, self.z_init)        
         
-        history=tf.zeros_like(x).numpy() 
-        history[:,:,0]=y
+        history=tf.zeros((tf.shape(dw)[0],1,self.bsde.num_time_interval+1)).numpy()
+        history[:,:,0]=y.numpy()
         
         for t in range(0, self.bsde.num_time_interval-1):
             y = y - self.bsde.delta_t * (

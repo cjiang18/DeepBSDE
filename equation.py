@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from scipy.stats import multivariate_normal as normal
-
+from tqdm import tqdm
 
 class Equation(object):
     """Base class for defining PDE related function."""

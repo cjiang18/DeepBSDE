@@ -125,8 +125,7 @@ class NonsharedModel(tf.keras.Model):
        
         history = history.write(self.bsde.num_time_interval,y)
         history = tf.transpose(history.stack(),perm=[1,2,0])
-        return history         
-        
+        return history                 
 
 
 class FeedForwardSubNet(tf.keras.Model):
@@ -144,7 +143,7 @@ class FeedForwardSubNet(tf.keras.Model):
             for _ in range(len(num_hiddens) + 2)]
         self.dense_layers = [tf.keras.layers.Dense(num_hiddens[i],
                                                    use_bias=False,
-                                                   activation=None)
+                                                   activation=None,)
                              for i in range(len(num_hiddens))]
         # final output should be gradient of size dim
         self.dense_layers.append(tf.keras.layers.Dense(dim, activation=None))

@@ -55,11 +55,7 @@ if __name__ == "__main__":
 
     
     #apply trained model to evaluate value of the forward contract via Monte Carlo
-    simulations = bsde_solver.model.predict(bsde.sample(P))
-    #simulations = np.zeros((P,1,config.eqn_config.num_time_interval+1))
-    #num_batch = P//batch_size #number of batches
-    #for i in tqdm(range(num_batch)):
-    #     simulations[i*batch_size:(i+1)*batch_size,:,:] = bsde_solver.model.simulate(bsde.sample(config.net_config.batch_size))
+    simulations = bsde_solver.model.predict(bsde.sample(P))    
     
     #estimated epected positive and negative exposure
     time_stamp = np.linspace(0,1,num_time_interval+1)

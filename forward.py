@@ -22,7 +22,7 @@ if __name__ == "__main__":
     config = {
                 "eqn_config": {
                     "_comment": "a forward contract",
-                    "eqn_name": "PricingForward",
+                    "eqn_name": "ForwardContract",
                     "total_time": total_time,
                     "dim": dim,
                     "num_time_interval": num_time_interval,
@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
     
     #apply trained model to evaluate value of the forward contract via Monte Carlo
-    simulations = bsde_solver.model.predict(bsde.sample(P))    
+    simulations = bsde_solver.model.simulate_path(bsde.sample(P))    
     
     #estimated epected positive and negative exposure
     time_stamp = np.linspace(0,1,num_time_interval+1)

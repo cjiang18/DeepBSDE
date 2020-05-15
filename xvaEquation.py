@@ -52,7 +52,7 @@ class EuropeanEquation(Equation):
         estimate = []           
         for i in tqdm(range(num_sample//1024)): #split into batches to estimate
             estimate += list(self.g_tf(1,self.sample(1024)[1][:,:,-1]).numpy()[:,0])
-        if num_sample%1024!= 0: #calculate the reminder number of smaples
+        if num_sample%1024!= 0: #calculate the remaining number of smaples
             estimate += list(self.g_tf(1,self.sample(num_sample%1024)[1][:,:,-1]).numpy()[:,0]) 
         estimate = np.array(estimate)*np.exp(-self.rate*self.total_time)
         mean = np.mean(estimate)
@@ -81,19 +81,54 @@ class BasketOption(EuropeanEquation):
         temp = tf.reduce_sum(x, 1,keepdims=True)
         return tf.maximum(temp - self.strike, 0)
 
+class Portfolio():
+
+    #!!!!!not yet finished!!!!
+    
+    def __init__(self,assets,weights=None):
+        # assets: a list of NonsharedModel
+        # weights: a list of weights for each asset. When not given, assumes equal weights  
+        # !!!Warning!!! Assumes independence between random drivers of each asset    
+        self.assets = assets
+        self.num_assets = len(assets)
+        if weights is None:
+            self.weights = [1/self.num_assets for i in range(self.num_assets)]
+        else:
+            self.weights = weights
+
+    def sample(self, num_sample):
+        #dw: averaged brownian drive
+        #dw: averaged 
+        dw,dv = self.assets[0].predict(self.assets[0].bsde.sample(num_sample))
+        if self.num_assets>1:
+            dw = dw*self.weights[0]
+            dv = dv*self.weights[0]
+            for i, weight in enumerate(self.weights[1:]):
+                dw_,dv_=self.assets[i+1].sample(self.assets[0].bsde.sample(num_sample))
+                dw = dw + dw_*weight
+                dv = dv + dv_*weight
+        return dw,dv
+
+
 
 class XVA(Equation):
     def __init__(self,eqn_config,clean_value):
-        super(XVA,self).__init__(eqn_config)
+        super(XVA,self).__init__(eqn_config)        
         self.rate = eqn_config.r # risk-free return
         self.intensityB = eqn_config.intensityB # default intensity of the bank
-        self.intensityC = eqn_config.intensityC # default intensity of the conterparty
+        self.intensityC = eqn_config.intensityC # default intensity of the counterparty
         self.r_fl = eqn_config.r_fl # unsecured funding lending rate
         self.r_fb = eqn_config.r_fb # unsecured funding borrowing rate
         self.r_cl = eqn_config.r_cl # interest rate on posted collateral
         self.r_cb = eqn_config.r_cb # interest rate on received collateral
-        self.clean_value = clean_value  # a tf.keras.model object (trained neural network), respresenting the clean value process
+        self.clean_value = clean_value  # Class NonsharedModel, respresenting the clean value process
         self.collateral = eqn_config.collateral
+        self.isXVA = True #indicating that we are dealing with x
+
+        try:
+            self.num_assets = clean_value.num_assets # when clean_value is a of class Portfolio
+        except AttributeError:
+            self.num_assets = None # when clean_value is a of class NonsharedModel, set to None
 
         #setting (default) value for recovery rate
         try:
@@ -106,12 +141,16 @@ class XVA(Equation):
             self.R_C = 0.6
 
     def sample(self, num_sample):
-        return self.clean_value.predict(num_sample)
+        if self.num_assets is None:
+            return self.clean_value.predict(self.clean_value.bsde.sample(num_sample))
+        else:
+            return self.clean_value.sample(num_sample)
 
-    def f_tf(self, t, x, y, z):
-        cva = (1-self.R_C)*tf.maximum(self.collateral-x,0)*self.intensityC
-        dva = (1-self.R_B)*tf.maximum(x-self.collateral,0)*self.intensityB
-        fva = (self.r_fl-self.rate)*tf.maximum(x-y-self.collateral,0) - (self.r_fb-self.rate)*tf.maximum(self.collateral+y-x,0)
+    def f_tf(self, t, x, y, z,v_clean):
+        # x: clean value, y:xva, z:control
+        cva = (1-self.R_C)*tf.maximum(self.collateral-v_clean,0)*self.intensityC
+        dva = (1-self.R_B)*tf.maximum(v_clean-self.collateral,0)*self.intensityB
+        fva = (self.r_fl-self.rate)*tf.maximum(v_clean-y-self.collateral,0) - (self.r_fb-self.rate)*tf.maximum(self.collateral+y-v_clean,0)
         colva = (self.r_cl-self.rate)*max(self.collateral,0) - (self.r_cb-self.rate)*max(-self.collateral,0)
         discount = -(self.rate+self.intensityB+self.intensityC)*y
 
@@ -119,3 +158,37 @@ class XVA(Equation):
     
     def g_tf(self, t, x):
         return 0.
+
+    def monte_carlo(self,num_sample=1024): #monte carlo estimation of CVA and DVA
+        
+        print('CVA and DVA Monte Carlo estimation started')
+        discount = np.exp(-(self.rate+self.intensityB+self.intensityC)*np.linspace(0,self.total_time,self.num_time_interval+1))
+       
+        estimate = []           
+        for i in tqdm(range(num_sample//1024)): #split into batches to estimate
+            v = self.sample(1024)[1] #shape (num_sample, dim=1, num_time_interval+1) 
+            phi_cva = (1-self.R_C)*discount*np.maximum(self.collateral-v,0)*self.intensityC
+            phi_dva = (1-self.R_B)*discount*np.maximum(v-self.collateral,0)*self.intensityB
+
+            #trapeziodal rule
+            cva = np.sum(phi_cva,axis=-1)-(phi_cva[:,:,-1]+phi_cva[:,:,0])/2
+            dva = np.sum(phi_dva,axis=-1)-(phi_dva[:,:,-1]+phi_dva[:,:,0])/2
+
+            estimate += list(dva[:,0]-cva[:,0])
+
+
+        if num_sample%1024!= 0: #calculate the remaining number of smaples
+            v = self.sample(num_sample%1024)[1] #shape (num_sample, dim=1, num_time_interval+1) 
+            phi_cva = (1-self.R_C)*discount*np.maximum(self.collateral-v,0)*self.intensityC
+            phi_dva = (1-self.R_B)*discount*np.maximum(v-self.collateral,0)*self.intensityB
+
+            #trapeziodal rule
+            cva = np.sum(phi_cva,axis=-1)-(phi_cva[:,:,-1]+phi_cva[:,:,0])/2
+            dva = np.sum(phi_dva,axis=-1)-(phi_dva[:,:,-1]+phi_dva[:,:,0])/2
+
+            estimate += list(dva[:,0]-cva[:,0])
+        estimate = np.array(estimate)*self.delta_t #times time-interval (height of a trapezium)
+        mean = np.mean(estimate)
+        std = np.std(estimate)/np.sqrt(num_sample)
+
+        return mean, [mean-3*std,mean+3*std]

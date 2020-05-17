@@ -20,7 +20,7 @@ class BSDESolver(object):
             self.isXVA = False
 
         self.model = NonsharedModel(config, bsde)
-        self.y_init = self.model.y_init
+        #self.y_init = self.model.y_init
 
         try:
             lr_schedule = config.net_config.lr_schedule
@@ -39,7 +39,7 @@ class BSDESolver(object):
         for step in tqdm(range(self.net_config.num_iterations+1)):
             if step % self.net_config.logging_frequency == 0:
                 loss = self.loss_fn(valid_data, training=False).numpy()
-                y_init = self.y_init.numpy()[0]
+                y_init = self.model.y_init.numpy()[0]
                 elapsed_time = time.time() - start_time
                 training_history.append([step, loss, y_init, elapsed_time])
                 if self.net_config.verbose:
@@ -47,7 +47,7 @@ class BSDESolver(object):
                     #    step, loss, y_init, elapsed_time))
                     print("step: %5u,    loss: %.4e, Y0: %.4e,   elapsed time: %3u" % (
                         step, loss, y_init, elapsed_time))
-            self.train_step(self.bsde.sample(self.net_config.batch_size))
+            self.train_step(self.bsde.sample(self.net_config.batch_size))            
         return np.array(training_history)
 
     def loss_fn(self, inputs, training):
@@ -66,6 +66,7 @@ class BSDESolver(object):
             loss = tf.reduce_mean(tf.where(tf.abs(delta) < DELTA_CLIP, tf.square(delta),
                                         2 * DELTA_CLIP * tf.abs(delta) - DELTA_CLIP ** 2))
 
+        loss += 1000*(tf.maximum(self.model.y_init[0]-self.net_config.y_init_range[1],0)+tf.maximum(self.net_config.y_init_range[0]-self.model.y_init[0],0))
         return loss
 
     def grad(self, inputs, training):
@@ -78,9 +79,7 @@ class BSDESolver(object):
     @tf.function
     def train_step(self, train_data):
         grad = self.grad(train_data, training=True)
-        self.optimizer.apply_gradients(zip(grad, self.model.trainable_variables))
-        self.model.y_init = tf.clip_by_value(self.model.y_init,self.net_config.y_init_range[0],self.net_config.y_init_range[1]) #restrict y_init to be in the MonteCarlo Bound
-        
+        self.optimizer.apply_gradients(zip(grad, self.model.trainable_variables))        
 class NonsharedModel(tf.keras.Model):
     def __init__(self, config, bsde):
         super(NonsharedModel, self).__init__()
@@ -88,6 +87,7 @@ class NonsharedModel(tf.keras.Model):
         self.eqn_config = config.eqn_config
         self.net_config = config.net_config
         self.bsde = bsde       
+        self.dim = bsde.dim
         self.y_init = tf.Variable(np.random.uniform(low=self.net_config.y_init_range[0],
                                                     high=self.net_config.y_init_range[1],
                                                     size=[1])
@@ -96,7 +96,7 @@ class NonsharedModel(tf.keras.Model):
                                                     size=[1, self.eqn_config.dim])
                                   )
 
-        self.subnet = [FeedForwardSubNet(config) for _ in range(self.bsde.num_time_interval-1)]
+        self.subnet = [FeedForwardSubNet(config,bsde.dim) for _ in range(self.bsde.num_time_interval-1)]
 
         try:
             self.isXVA = bsde.isXVA
@@ -196,9 +196,8 @@ class NonsharedModel(tf.keras.Model):
 
 
 class FeedForwardSubNet(tf.keras.Model):
-    def __init__(self, config):
-        super(FeedForwardSubNet, self).__init__()
-        dim = config.eqn_config.dim
+    def __init__(self, config,dim):
+        super(FeedForwardSubNet, self).__init__()        
         num_hiddens = config.net_config.num_hiddens
         self.bn_layers = [
             tf.keras.layers.BatchNormalization(

@@ -39,8 +39,8 @@ if __name__ == "__main__":
                 "net_config": {
                     "y_init_range": [154.37,165.41], #set to None when not sure
                     "num_hiddens": [dim+10, dim+10],
-                    "lr_values": [5e-3, 5e-3],
-                    "lr_boundaries": [2000],
+                    "lr_values": [5e-1,5e-2, 5e-3],
+                    "lr_boundaries": [1000,2000],
                     "num_iterations": 4000,
                     "batch_size": batch_size,
                     "valid_size": 128,
@@ -56,7 +56,7 @@ if __name__ == "__main__":
                     "_comment": "xVA estimation",
                     "eqn_name": "XVA",
                     "total_time": total_time,
-                    "dim": 1,
+                    "dim": 100,
                     "num_time_interval": num_time_interval,                    
                     "r":r,
                     "intensityB": 0.01, # default intensity of the bank
@@ -77,7 +77,7 @@ if __name__ == "__main__":
                     "num_hiddens": [11, 11],
                     "lr_values": [5e-2, 5e-3],
                     "lr_boundaries": [2000],
-                    "num_iterations": 4000,
+                    "num_iterations":4000,
                     "batch_size": batch_size,
                     "valid_size": 128,
                     "logging_frequency": 200,
@@ -98,13 +98,13 @@ if __name__ == "__main__":
 
     #apply algorithm 1
     bsde_solver = BSDESolver(config, bsde)
-    #training_history = bsde_solver.train()
+    training_history = bsde_solver.train()
 
     # algotihm 2 & 3
     xva_config = munch.munchify(xva_config)
     xva_bsde = getattr(eqn, xva_config.eqn_config.eqn_name)(xva_config.eqn_config,bsde_solver.model)
     xva_solver = BSDESolver(xva_config,xva_bsde)
-    #xva_train_history = xva_solver.train()
+    xva_train_history = xva_solver.train()
 
     xva_MonteCarlo = xva_bsde.monte_carlo(10000)
 

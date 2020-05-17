@@ -81,9 +81,7 @@ class BasketOption(EuropeanEquation):
         temp = tf.reduce_sum(x, 1,keepdims=True)
         return tf.maximum(temp - self.strike, 0)
 
-class Portfolio():
-
-    #!!!!!not yet finished!!!!
+class Portfolio():   
     
     def __init__(self,assets,weights=None):
         # assets: a list of NonsharedModel
@@ -95,17 +93,16 @@ class Portfolio():
             self.weights = [1/self.num_assets for i in range(self.num_assets)]
         else:
             self.weights = weights
+        self.dim = sum([asset.bsde.dim for asset in assets ])
 
     def sample(self, num_sample):
-        #dw: averaged brownian drive
-        #dw: averaged 
+         
         dw,dv = self.assets[0].predict(self.assets[0].bsde.sample(num_sample))
-        if self.num_assets>1:
-            dw = dw*self.weights[0]
+        if self.num_assets>1:            
             dv = dv*self.weights[0]
             for i, weight in enumerate(self.weights[1:]):
                 dw_,dv_=self.assets[i+1].sample(self.assets[0].bsde.sample(num_sample))
-                dw = dw + dw_*weight
+                dw = np.concatenate((dw,dw_),axis=1)
                 dv = dv + dv_*weight
         return dw,dv
 
@@ -113,7 +110,12 @@ class Portfolio():
 
 class XVA(Equation):
     def __init__(self,eqn_config,clean_value):
-        super(XVA,self).__init__(eqn_config)        
+        self.dim = clean_value.dim
+        self.total_time = eqn_config.total_time
+        self.num_time_interval = eqn_config.num_time_interval
+        self.delta_t = self.total_time / self.num_time_interval
+        self.sqrt_delta_t = np.sqrt(self.delta_t)
+        self.y_init = None       
         self.rate = eqn_config.r # risk-free return
         self.intensityB = eqn_config.intensityB # default intensity of the bank
         self.intensityC = eqn_config.intensityC # default intensity of the counterparty
@@ -123,12 +125,12 @@ class XVA(Equation):
         self.r_cb = eqn_config.r_cb # interest rate on received collateral
         self.clean_value = clean_value  # Class NonsharedModel, respresenting the clean value process
         self.collateral = eqn_config.collateral
-        self.isXVA = True #indicating that we are dealing with x
-
+        self.isXVA = True #indicating that we are dealing with xva
+        self.dim = clean_value.dim
         try:
             self.num_assets = clean_value.num_assets # when clean_value is a of class Portfolio
         except AttributeError:
-            self.num_assets = None # when clean_value is a of class NonsharedModel, set to None
+            self.num_assets = None # when clean_value is of class NonsharedModel, set to None
 
         #setting (default) value for recovery rate
         try:
@@ -147,7 +149,7 @@ class XVA(Equation):
             return self.clean_value.sample(num_sample)
 
     def f_tf(self, t, x, y, z,v_clean):
-        # x: clean value, y:xva, z:control
+        # x: underlying, y:xva, z:control
         cva = (1-self.R_C)*tf.maximum(self.collateral-v_clean,0)*self.intensityC
         dva = (1-self.R_B)*tf.maximum(v_clean-self.collateral,0)*self.intensityB
         fva = (self.r_fl-self.rate)*tf.maximum(v_clean-y-self.collateral,0) - (self.r_fb-self.rate)*tf.maximum(self.collateral+y-v_clean,0)
@@ -156,7 +158,7 @@ class XVA(Equation):
 
         return -cva + dva + fva + colva + discount
     
-    def g_tf(self, t, x):
+    def g_tf(self, t, x,v_clean):
         return 0.
 
     def monte_carlo(self,num_sample=1024): #monte carlo estimation of CVA and DVA

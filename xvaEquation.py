@@ -82,7 +82,7 @@ class BasketOption(EuropeanEquation):
         return tf.maximum(temp - self.strike, 0)
 
 class Portfolio():   
-    
+    # takes in a list of NonsharedModel (financial derivatives) and can be passed as a clean_value process to an XVA object
     def __init__(self,assets,weights=None):
         # assets: a list of NonsharedModel
         # weights: a list of weights for each asset. When not given, assumes equal weights  
@@ -97,14 +97,15 @@ class Portfolio():
 
     def sample(self, num_sample):
          
-        dw,dv = self.assets[0].predict(self.assets[0].bsde.sample(num_sample))
+        w,x,v = self.assets[0].predict(self.assets[0].bsde.sample(num_sample))
         if self.num_assets>1:            
-            dv = dv*self.weights[0]
+            v = v*self.weights[0]
             for i, weight in enumerate(self.weights[1:]):
-                dw_,dv_=self.assets[i+1].sample(self.assets[0].bsde.sample(num_sample))
-                dw = np.concatenate((dw,dw_),axis=1)
-                dv = dv + dv_*weight
-        return dw,dv
+                w_,x_,v_=self.assets[i+1].sample(self.assets[0].bsde.sample(num_sample))
+                w = np.concatenate((w,w_),axis=1)
+                x = np.concatenate((x,x_),axis=1)
+                v = v + v_*weight
+        return w,x,v
 
 
 

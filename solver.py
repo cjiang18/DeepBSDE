@@ -3,13 +3,13 @@ import time
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
-
+import tensorflow.keras.layers as layers
 DELTA_CLIP = 50.0
 
 
 class BSDESolver(object):
     """The fully connected neural network model."""
-    def __init__(self, config, bsde):
+    def __init__(self, config, bsde,use_universal_model = False):
         self.eqn_config = config.eqn_config
         self.net_config = config.net_config
         self.bsde = bsde
@@ -18,8 +18,8 @@ class BSDESolver(object):
             self.isXVA = bsde.isXVA
         except AttributeError:
             self.isXVA = False
-
-        self.model = NonsharedModel(config, bsde)
+        
+        self.model = NonsharedModel(config, bsde,use_universal_model)
         #self.y_init = self.model.y_init
 
         try:
@@ -79,9 +79,11 @@ class BSDESolver(object):
     @tf.function
     def train_step(self, train_data):
         grad = self.grad(train_data, training=True)
-        self.optimizer.apply_gradients(zip(grad, self.model.trainable_variables))        
+        self.optimizer.apply_gradients(zip(grad, self.model.trainable_variables))     
+
+
 class NonsharedModel(tf.keras.Model):
-    def __init__(self, config, bsde):
+    def __init__(self, config, bsde,use_universal_model):
         super(NonsharedModel, self).__init__()
         self.config = config
         self.eqn_config = config.eqn_config
@@ -94,9 +96,11 @@ class NonsharedModel(tf.keras.Model):
                                   )
         self.z_init = tf.Variable(np.random.uniform(low=-.1, high=.1,
                                                     size=[1, self.eqn_config.dim])
-                                  )
-
-        self.subnet = [FeedForwardSubNet(config,bsde.dim) for _ in range(self.bsde.num_time_interval-1)]
+                                  )        
+        if use_universal_model: 
+            self.subnet = get_universal_neural_network(self.dim+1)
+        else:
+            self.subnet = [FeedForwardSubNet(config,bsde.dim) for _ in range(self.bsde.num_time_interval-1)]
 
         try:
             self.isXVA = bsde.isXVA
@@ -115,8 +119,11 @@ class NonsharedModel(tf.keras.Model):
             for t in range(0, self.bsde.num_time_interval-1):
                 y = y - self.bsde.delta_t * (
                     self.bsde.f_tf(time_stamp[t], x[:, :, t], y, z,v_clean[:,:,t])
-                ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)           
-                z = self.subnet[t](x[:, :, t + 1], training) / self.bsde.dim
+                ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True) 
+                try:          
+                    z = self.subnet[t](x[:, :, t + 1], training) / self.bsde.dim
+                except TypeError:
+                    z = self.subnet(tf.concat([time_stamp[t+1]*all_one_vec,x[:, :, t + 1]],axis=1), training=training) / self.bsde.dim
             # terminal time
             y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z,v_clean[:,:,-2]) + \
                 tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
@@ -131,7 +138,10 @@ class NonsharedModel(tf.keras.Model):
                 y = y - self.bsde.delta_t * (
                     self.bsde.f_tf(time_stamp[t], x[:, :, t], y, z)
                 ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)           
-                z = self.subnet[t](x[:, :, t + 1], training) / self.bsde.dim
+                try:          
+                    z = self.subnet[t](x[:, :, t + 1], training) / self.bsde.dim
+                except TypeError:
+                    z = self.subnet(tf.concat([time_stamp[t+1]*all_one_vec,x[:, :, t + 1]],axis=1), training=training) / self.bsde.dim
             # terminal time
             y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z) + \
                 tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
@@ -155,7 +165,10 @@ class NonsharedModel(tf.keras.Model):
                 ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)
                 
                 history = history.write(t+1,y)
-                z = self.subnet[t](x[:, :, t + 1], False) / self.bsde.dim
+                try:          
+                    z = self.subnet[t](x[:, :, t + 1], training=False) / self.bsde.dim
+                except TypeError:
+                    z = self.subnet(tf.concat([time_stamp[t+1]*all_one_vec,x[:, :, t + 1]],axis=1), training=False) / self.bsde.dim
             # terminal time
             y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z,v_clean[:,:,-2]) + \
                 tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
@@ -179,7 +192,10 @@ class NonsharedModel(tf.keras.Model):
                 ) + tf.reduce_sum(z * dw[:, :, t], 1, keepdims=True)
                 
                 history = history.write(t+1,y)
-                z = self.subnet[t](x[:, :, t + 1], False) / self.bsde.dim
+                try:          
+                    z = self.subnet[t](x[:, :, t + 1], training=False) / self.bsde.dim
+                except TypeError:
+                    z = self.subnet(tf.concat([time_stamp[t+1]*all_one_vec,x[:, :, t + 1]],axis=1), training=False) / self.bsde.dim
             # terminal time
             y = y - self.bsde.delta_t * self.bsde.f_tf(time_stamp[-1], x[:, :, -2], y, z) + \
                 tf.reduce_sum(z * dw[:, :, -1], 1, keepdims=True)
@@ -215,12 +231,62 @@ class FeedForwardSubNet(tf.keras.Model):
         self.dense_layers.append(tf.keras.layers.Dense(dim, activation=None))
 
     def call(self, x, training):
-        """structure: bn -> (dense -> bn -> relu) * len(num_hiddens) -> dense -> bn"""
+        """structure: bn -> (dense -> bn -> relu) * len(num_hiddens) -> dense """
         x = self.bn_layers[0](x, training)
         for i in range(len(self.dense_layers) - 1):
             x = self.dense_layers[i](x)
             x = self.bn_layers[i+1](x, training)
             x = tf.nn.relu(x)
         x = self.dense_layers[-1](x)
-        x = self.bn_layers[-1](x, training)
         return x
+
+### univeral neural networks instead of one neural network at each time point
+
+
+def get_universal_neural_network(input_dim,num_neurons=20,num_hidden_blocks=4):
+    
+    input = tf.keras.Input(shape=(input_dim,))
+    x = layers.BatchNormalization()(input)
+
+    s = layers.Dense(num_neurons,activation='relu',use_bias=False)(x)
+    s = layers.BatchNormalization()(s)
+    for i in range(num_hidden_blocks-1):        
+
+        z = layers.add([layers.Dense(num_neurons,None,False)(x),layers.Dense(num_neurons,None,False)(s)])
+        z = Add_bias(num_neurons)(z)
+        z = layers.Activation(tf.nn.sigmoid)(z)
+       
+
+        g = layers.add([layers.Dense(num_neurons,None,False)(x),layers.Dense(num_neurons,None,False)(s)])
+        g = Add_bias(num_neurons)(g)
+        g = layers.Activation(tf.nn.sigmoid)(g)
+
+        r = layers.add([layers.Dense(num_neurons,None,False)(x),layers.Dense(num_neurons,None,False)(s)])
+        r = Add_bias(num_neurons)(r)
+        r = layers.Activation(tf.nn.sigmoid)(r)
+
+        h = layers.add([layers.Dense(num_neurons,None,False)(x),layers.Dense(num_neurons,None,False)(layers.multiply([s,r]))])
+        h = Add_bias(num_neurons)(h)
+        h = layers.Activation(tf.nn.relu)(h)
+
+        s = layers.add([layers.multiply([1-g,h]),layers.multiply([z,s])])
+        s = layers.BatchNormalization()(s)
+    
+    output = layers.Dense(input_dim-1,None)(s)
+
+    return tf.keras.Model(input,output)
+
+      
+class Add_bias(tf.keras.layers.Layer):
+    def __init__(self,units):        
+        super(Add_bias, self).__init__()       
+        self.units = units
+    def build(self, input_shape):              
+        self.b = self.add_weight(shape=(self.units,),
+                                initializer='zeros',
+                                trainable=True)
+    def call(self, inputs):
+        return inputs + self.b
+
+
+    

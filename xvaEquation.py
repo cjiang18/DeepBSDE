@@ -18,7 +18,7 @@ class EuropeanEquation(Equation):
         except AttributeError:
             self.rate = 0.0   # when not specified, set to 0
 
-        self.useExplict = False #whether to use explict formula to evaluate dyanamics of x
+        self.useExplict = True #whether to use explict formula to evaluate dyanamics of x
 
     def sample(self, num_sample):
         dw_sample = normal.rvs(size=[num_sample,     

@@ -19,8 +19,10 @@ class EuropeanEquation(Equation):
             self.rate = 0.0   # when not specified, set to 0
 
         self.useExplict = True #whether to use explict formula to evaluate dyanamics of x
-
-    def sample(self, num_sample):
+    
+    def sample(self, num_sample,use_gpu=False):
+        if use_gpu:
+            return self.sample_tf(num_sample)
         dw_sample = normal.rvs(size=[num_sample,     
                                      self.dim,
                                      self.num_time_interval]) * self.sqrt_delta_t
@@ -39,8 +41,31 @@ class EuropeanEquation(Equation):
             for i in range(self.num_time_interval):
          	    x_sample[:, :, i + 1] = (1 + self.rate * self.delta_t) * x_sample[:, :, i] + (self.sigma * x_sample[:, :, i] * dw_sample[:, :, i])       
         
-        return dw_sample, x_sample  
+        return dw_sample, x_sample 
+    
+    
+    
+    def sample_tf(self, num_sample):  
+        x = tf.Variable(tf.ones([num_sample, self.dim],dtype=tf.float64) * self.x_init,dtype=tf.float64)      
+        dw_sample = tf.random.normal(shape=[num_sample,     
+                                    self.dim,
+                                    self.num_time_interval],dtype=tf.float64) * self.sqrt_delta_t     
+            
 
+        x_ta = tf.TensorArray(tf.float64,size=0,dynamic_size=True)
+        x_ta = x_ta.write(0,tf.ones([num_sample, self.dim],dtype=tf.float64) * self.x_init)
+        if self.useExplict: #use analytic solution of linear SDE
+            factor = tf.exp((self.rate-(self.sigma**2)/2)*self.delta_t)
+            for i in tf.range(self.num_time_interval):   
+                x.assign((factor * tf.exp(self.sigma * dw_sample[:, :, i])) * x)
+                x_ta = x_ta.write(i+1,x)
+        else:   #use Euler-Maruyama scheme
+            for i in tf.range(self.num_time_interval):
+                x.assign((1+self.rate*self.delta_t)*x +(self.sigma*x*dw_sample[:,:,i]))
+                x_ta = x_ta.write(i+1,x)                   
+        return dw_sample, tf.transpose(x_ta.stack(),[1,2,0]) 
+    
+    
 
     def f_tf(self, t, x, y, z):
 
@@ -195,3 +220,18 @@ class XVA(Equation):
         std = np.std(estimate)/np.sqrt(num_sample)
 
         return mean, [mean-3*std,mean+3*std]
+
+if __name__ == "__main__":
+    v = tf.Variable(1)
+
+    @tf.function
+    def f(x):
+        ta = tf.TensorArray(tf.int32, size=0, dynamic_size=True)
+
+        for i in tf.range(x):
+            v.assign_add(i)
+            ta = ta.write(i, v)
+
+        return ta.stack()
+
+    print(f(5))

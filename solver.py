@@ -92,10 +92,10 @@ class NonsharedModel(tf.keras.Model):
         self.dim = bsde.dim
         self.y_init = tf.Variable(np.random.uniform(low=self.net_config.y_init_range[0],
                                                     high=self.net_config.y_init_range[1],
-                                                    size=[1])
+                                                    size=[1]),dtype=self.net_config.dtype
                                   )
         self.z_init = tf.Variable(np.random.uniform(low=-.1, high=.1,
-                                                    size=[1, self.eqn_config.dim])
+                                                    size=[1, self.eqn_config.dim]),dtype=self.net_config.dtype
                                   )        
         if use_universal_model: 
             self.subnet = get_universal_neural_network(self.dim+1)
@@ -241,8 +241,16 @@ class FeedForwardSubNet(tf.keras.Model):
         return x
 
 ### univeral neural networks instead of one neural network at each time point
-
-
+def get_universal_neural_network(input_dim):    
+    input = layers.Input(shape=(input_dim,))
+    x = layers.BatchNormalization()(input)    
+    for i in range(5):
+        x = layers.Dense(input_dim+10,'relu',False)(x)
+        x = layers.BatchNormalization()(x)
+    output = layers.Dense(input_dim-1,'relu')(x)
+    #output = layers.Dense(2*dim,'relu')(x)
+    return tf.keras.Model(input,output)
+'''
 def get_universal_neural_network(input_dim,num_neurons=20,num_hidden_blocks=4):
     
     input = tf.keras.Input(shape=(input_dim,))
@@ -275,7 +283,7 @@ def get_universal_neural_network(input_dim,num_neurons=20,num_hidden_blocks=4):
     output = layers.Dense(input_dim-1,None)(s)
 
     return tf.keras.Model(input,output)
-
+'''
       
 class Add_bias(tf.keras.layers.Layer):
     def __init__(self,units):        

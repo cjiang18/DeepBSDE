@@ -18,7 +18,7 @@ if __name__ == "__main__":
     strike = 100
     r = 0.0
     sigma=0.25
-    x_init=100
+    x_init=100.0
     config = {
                 "eqn_config": {
                     "_comment": "a forward contract",
@@ -48,6 +48,7 @@ if __name__ == "__main__":
     config = munch.munchify(config) 
     bsde = getattr(eqn, config.eqn_config.eqn_name)(config.eqn_config)
     tf.keras.backend.set_floatx(config.net_config.dtype)
+    
     
     #apply algorithm 1
     bsde_solver = BSDESolver(config, bsde)
